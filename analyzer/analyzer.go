@@ -16,7 +16,7 @@ import (
 // Analyzer is the main entry point for the linter.
 var Analyzer = &analysis.Analyzer{
 	Name:     "const",
-	Doc:      "checks for writes to struct fields marked with // +const",
+	Doc:      "checks for writes to struct fields marked with // +const", // TODO: improve doc field, include new markers
 	Run:      run,
 	Requires: []*analysis.Analyzer{inspect.Analyzer},
 }
