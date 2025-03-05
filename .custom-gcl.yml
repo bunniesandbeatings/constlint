@@ -1,0 +1,5 @@
+version: v1.64.6  # Use your preferred golangci-lint version
+plugins:
+  - module: 'github.com/bunniesandbeatings/constlint'
+    import: 'github.com/bunniesandbeatings/constlint/plugin'
+    version: v1.0.0  # Use the appropriate version

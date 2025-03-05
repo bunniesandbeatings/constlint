@@ -1,9 +1,8 @@
 linters-settings:
   custom:
     constlint:
-      path: github.com/bunniesandbeatings/constlint/plugin.so
+      type: "module"
       description: Checks for writes to struct fields marked with // +const
-      original-url: github.com/bunniesandbeatings/constlint
 
 linters:
   enable:
