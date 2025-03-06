@@ -105,10 +105,14 @@ func run(pass *analysis.Pass) (interface{}, error) {
 				return
 			}
 
-			// Look for +const: comment
+			// Look for +const comment
 			var constParamList string
+			var allParamsConst bool
+			
 			for _, comment := range node.Doc.List {
 				text := comment.Text
+				
+				// Check for +const:[param1,param2] format
 				constIndex := strings.Index(text, "// +const:[")
 				if constIndex != -1 {
 					startIdx := constIndex + len("// +const:[")
@@ -118,16 +122,36 @@ func run(pass *analysis.Pass) (interface{}, error) {
 						break
 					}
 				}
+				
+				// Check for standalone +const marker (all params are const)
+				if strings.TrimSpace(text) == "// +const" {
+					allParamsConst = true
+					break
+				}
 			}
 
-			if constParamList == "" {
+			// If neither format was found, return
+			if constParamList == "" && !allParamsConst {
 				return
 			}
 
-			// Parse the parameter list
-			paramNames := strings.Split(constParamList, ",")
-			for i := range paramNames {
-				paramNames[i] = strings.TrimSpace(paramNames[i])
+			// Get all parameter names if allParamsConst is true
+			var paramNames []string
+			if allParamsConst {
+				// Get all parameter names from the function
+				if node.Type.Params != nil {
+					for _, field := range node.Type.Params.List {
+						for _, name := range field.Names {
+							paramNames = append(paramNames, name.Name)
+						}
+					}
+				}
+			} else {
+				// Parse the parameter list from the comment
+				paramNames = strings.Split(constParamList, ",")
+				for i := range paramNames {
+					paramNames[i] = strings.TrimSpace(paramNames[i])
+				}
 			}
 
 			// Get function name and package path
