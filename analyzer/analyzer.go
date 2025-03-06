@@ -40,86 +40,77 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	// Maps to store const fields and parameters
 	constFields := make(map[constField]token.Pos)
 
-	// First pass: find all struct fields marked with // +const
+	// First pass: find all struct fields and function parameters marked with // +const
+	constParams := make(map[constParam]token.Pos)
 	nodeFilter := []ast.Node{
 		(*ast.TypeSpec)(nil),
-	}
-
-	inspector.Preorder(nodeFilter, func(n ast.Node) {
-		typeSpec, ok := n.(*ast.TypeSpec)
-		if !ok {
-			return
-		}
-
-		structType, ok := typeSpec.Type.(*ast.StructType)
-		if !ok {
-			return
-		}
-
-		// Get the type object for this struct
-		obj := pass.TypesInfo.Defs[typeSpec.Name]
-		if obj == nil {
-			return
-		}
-
-		typeName, ok := obj.(*types.TypeName)
-		if !ok {
-			return
-		}
-
-		// Check each field for the +const comment
-		for _, field := range structType.Fields.List {
-			if field.Doc == nil && field.Comment == nil {
-				continue
-			}
-
-			var hasConstMarker bool
-			// Check doc comments
-			if field.Doc != nil {
-				for _, comment := range field.Doc.List {
-					if strings.Contains(comment.Text, "+const") {
-						hasConstMarker = true
-						break
-					}
-				}
-			}
-
-			// Check inline comments
-			if !hasConstMarker && field.Comment != nil {
-				for _, comment := range field.Comment.List {
-					if strings.Contains(comment.Text, "+const") {
-						hasConstMarker = true
-						break
-					}
-				}
-			}
-
-			if hasConstMarker {
-				for _, name := range field.Names {
-					constFields[constField{
-						structType: typeName,
-						fieldName:  name.Name,
-					}] = name.Pos()
-				}
-			}
-		}
-	})
-
-	// Find all function parameters marked with // +const:[param1,param2,...]
-	constParams := make(map[constParam]token.Pos)
-	funcFilter := []ast.Node{
 		(*ast.FuncDecl)(nil),
 	}
 
-	inspector.Preorder(funcFilter, func(n ast.Node) {
-		funcDecl, ok := n.(*ast.FuncDecl)
-		if !ok || funcDecl.Doc == nil {
+	inspector.Preorder(nodeFilter, func(n ast.Node) {
+		switch node := n.(type) {
+		case *ast.TypeSpec:
+			structType, ok := node.Type.(*ast.StructType)
+			if !ok {
+				return
+			}
+
+			// Get the type object for this struct
+			obj := pass.TypesInfo.Defs[node.Name]
+			if obj == nil {
+				return
+			}
+
+			typeName, ok := obj.(*types.TypeName)
+			if !ok {
+				return
+			}
+
+			// Check each field for the +const comment
+			for _, field := range structType.Fields.List {
+				if field.Doc == nil && field.Comment == nil {
+					continue
+				}
+
+				var hasConstMarker bool
+				// Check doc comments
+				if field.Doc != nil {
+					for _, comment := range field.Doc.List {
+						if strings.Contains(comment.Text, "+const") {
+							hasConstMarker = true
+							break
+						}
+					}
+				}
+
+				// Check inline comments
+				if !hasConstMarker && field.Comment != nil {
+					for _, comment := range field.Comment.List {
+						if strings.Contains(comment.Text, "+const") {
+							hasConstMarker = true
+							break
+						}
+					}
+				}
+
+				if hasConstMarker {
+					for _, name := range field.Names {
+						constFields[constField{
+							structType: typeName,
+							fieldName:  name.Name,
+						}] = name.Pos()
+					}
+				}
+			}
+			
+		case *ast.FuncDecl:
+			if node.Doc == nil {
 			return
 		}
 
-		// Look for +const: comment
-		var constParamList string
-		for _, comment := range funcDecl.Doc.List {
+			// Look for +const: comment
+			var constParamList string
+			for _, comment := range node.Doc.List {
 			text := comment.Text
 			constIndex := strings.Index(text, "// +const:[")
 			if constIndex != -1 {
@@ -132,27 +123,28 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			}
 		}
 
-		if constParamList == "" {
-			return
-		}
+			if constParamList == "" {
+				return
+			}
 
-		// Parse the parameter list
-		paramNames := strings.Split(constParamList, ",")
-		for i := range paramNames {
-			paramNames[i] = strings.TrimSpace(paramNames[i])
-		}
+			// Parse the parameter list
+			paramNames := strings.Split(constParamList, ",")
+			for i := range paramNames {
+				paramNames[i] = strings.TrimSpace(paramNames[i])
+			}
 
-		// Get function name and package path
-		funcName := funcDecl.Name.Name
-		packagePath := pass.Pkg.Path()
+			// Get function name and package path
+			funcName := node.Name.Name
+			packagePath := pass.Pkg.Path()
 
-		// Mark each parameter as const
-		for _, paramName := range paramNames {
-			constParams[constParam{
-				funcName:    funcName,
-				paramName:   paramName,
-				packagePath: packagePath,
-			}] = funcDecl.Pos()
+			// Mark each parameter as const
+			for _, paramName := range paramNames {
+				constParams[constParam{
+					funcName:    funcName,
+					paramName:   paramName,
+					packagePath: packagePath,
+				}] = node.Pos()
+			}
 		}
 	})
 
