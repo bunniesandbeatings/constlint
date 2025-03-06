@@ -20,7 +20,7 @@ func UpdatePersonObject(p *Person) {
 	p = &Person{} // want "assignment to const parameter"
 
 	// These are still checked by the field const checker
-	p.Name = "Bob" // want "assignment to const field"
+	p.Name = "Bob" // OK: function is a const function
 	p.Age = 40     // OK: Age is not marked as const
 }
 

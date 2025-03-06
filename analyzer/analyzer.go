@@ -37,16 +37,13 @@ type constParam struct {
 func run(pass *analysis.Pass) (interface{}, error) {
 	inspector := pass.ResultOf[inspect.Analyzer].(*astinspector.Inspector)
 
-	// Maps to store const fields and parameters
-	constFields := make(map[constField]token.Pos)
-
 	// First pass: find all struct fields and function parameters marked with // +const
+	constFields := make(map[constField]token.Pos)
 	constParams := make(map[constParam]token.Pos)
 	nodeFilter := []ast.Node{
 		(*ast.TypeSpec)(nil),
 		(*ast.FuncDecl)(nil),
 	}
-
 	inspector.Preorder(nodeFilter, func(n ast.Node) {
 		switch node := n.(type) {
 		case *ast.TypeSpec:
@@ -102,26 +99,26 @@ func run(pass *analysis.Pass) (interface{}, error) {
 					}
 				}
 			}
-			
+
 		case *ast.FuncDecl:
 			if node.Doc == nil {
-			return
-		}
+				return
+			}
 
 			// Look for +const: comment
 			var constParamList string
 			for _, comment := range node.Doc.List {
-			text := comment.Text
-			constIndex := strings.Index(text, "// +const:[")
-			if constIndex != -1 {
-				startIdx := constIndex + len("// +const:[")
-				endIdx := strings.Index(text[startIdx:], "]")
-				if endIdx != -1 {
-					constParamList = text[startIdx : startIdx+endIdx]
-					break
+				text := comment.Text
+				constIndex := strings.Index(text, "// +const:[")
+				if constIndex != -1 {
+					startIdx := constIndex + len("// +const:[")
+					endIdx := strings.Index(text[startIdx:], "]")
+					if endIdx != -1 {
+						constParamList = text[startIdx : startIdx+endIdx]
+						break
+					}
 				}
 			}
-		}
 
 			if constParamList == "" {
 				return
@@ -148,10 +145,10 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 	})
 
+	// Second pass: locate mutations of constant fields or params
 	assignFilter := []ast.Node{
 		(*ast.AssignStmt)(nil),
 	}
-
 	inspector.Preorder(assignFilter, func(n ast.Node) {
 		assignStmt, ok := n.(*ast.AssignStmt)
 		if !ok {
@@ -224,7 +221,7 @@ func checkAssignment(pass *analysis.Pass, expr ast.Expr, constFields map[constFi
 
 	if fieldPos, exists := constFields[cf]; exists {
 		// Now we need to determine if we're in a constructor
-		if !isInConstructor(pass, selExpr, namedType) {
+		if !isInstanciator(pass, selExpr, namedType) {
 			pass.Reportf(selExpr.Pos(), "assignment to const field %s.%s (marked with // +const at %s)",
 				typeName.Name(), fieldName, pass.Fset.Position(fieldPos))
 		}
@@ -279,8 +276,7 @@ func checkParamAssignment(pass *analysis.Pass, expr ast.Expr, constParams map[co
 	}
 }
 
-// isInConstructor checks if the given expression is within a constructor method/function
-func isInConstructor(pass *analysis.Pass, expr ast.Expr, namedType *types.Named) bool {
+func isInstanciator(pass *analysis.Pass, expr ast.Expr, namedType *types.Named) bool {
 	// Find the enclosing function
 	path, _ := astPath(pass.Files, expr)
 	var funcDecl *ast.FuncDecl
@@ -295,63 +291,36 @@ func isInConstructor(pass *analysis.Pass, expr ast.Expr, namedType *types.Named)
 		return false
 	}
 
-	// Check if this is a method of the struct
-	if funcDecl.Recv != nil && len(funcDecl.Recv.List) == 1 {
-		recvType := pass.TypesInfo.TypeOf(funcDecl.Recv.List[0].Type)
-		if recvType == nil {
+	// Check if the function contains a composite literal of the struct type
+	foundInstantiation := false
+	ast.Inspect(funcDecl.Body, func(n ast.Node) bool {
+		if foundInstantiation {
 			return false
 		}
 
-		// Handle pointer receiver
-		if ptr, ok := recvType.(*types.Pointer); ok {
-			recvType = ptr.Elem()
+		// Look for composite literals
+		if compLit, ok := n.(*ast.CompositeLit); ok {
+			// Get the type of the composite literal
+			litType := pass.TypesInfo.TypeOf(compLit.Type)
+			if litType == nil {
+				return true
+			}
+
+			// Handle pointer types
+			if ptr, ok := litType.(*types.Pointer); ok {
+				litType = ptr.Elem()
+			}
+
+			// Check if it's our struct type
+			if types.Identical(litType, namedType) {
+				foundInstantiation = true
+				return false
+			}
 		}
+		return true
+	})
 
-		// Check if the receiver is our struct type
-		if recvType == namedType.Underlying() {
-			// This is a method of our struct
-			return isConstructorName(funcDecl.Name.Name) || returnsOwnType(pass, funcDecl, namedType)
-		}
-	}
-
-	// Check if this is a function that returns the struct type
-	return returnsOwnType(pass, funcDecl, namedType)
-}
-
-// isConstructorName checks if the function name follows constructor naming conventions
-func isConstructorName(name string) bool {
-	constructorPrefixes := []string{"New", "Create", "Init", "Make"}
-	for _, prefix := range constructorPrefixes {
-		if strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-// returnsOwnType checks if the function returns the struct type
-func returnsOwnType(pass *analysis.Pass, funcDecl *ast.FuncDecl, namedType *types.Named) bool {
-	if funcDecl.Type.Results == nil {
-		return false
-	}
-
-	for _, result := range funcDecl.Type.Results.List {
-		resultType := pass.TypesInfo.TypeOf(result.Type)
-		if resultType == nil {
-			continue
-		}
-
-		// Handle pointer return type
-		if ptr, ok := resultType.(*types.Pointer); ok {
-			resultType = ptr.Elem()
-		}
-
-		if resultType == namedType {
-			return true
-		}
-	}
-
-	return false
+	return foundInstantiation
 }
 
 // astPath returns the path from the root of the AST to the given node
