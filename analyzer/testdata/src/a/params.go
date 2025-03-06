@@ -8,6 +8,14 @@ func UpdatePersonWithConstParams(name string, age int, email string) {
 	email = "john@example.com" // OK: not marked as const
 }
 
+// AllConstParams treats the solo marker as all params are consts
+// +const
+func AllConstParams(name string, age int, email string) {
+	name = "John"              // want "assignment to const parameter"
+	age = 30                   // want "assignment to const parameter"
+	email = "john@example.com" // want "assignment to const parameter"
+}
+
 // RegularFunction without const parameters
 func RegularFunction(name string, age int) {
 	name = "Jane" // OK: not marked as const
